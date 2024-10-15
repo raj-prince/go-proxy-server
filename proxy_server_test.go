@@ -13,6 +13,7 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/googleapis/gax-go/v2"
 	"github.com/raj-prince/go-proxy-server/util"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -74,7 +75,7 @@ func TestSomething(t *testing.T) {
 	objName := fmt.Sprintf("%d-object", prefix)
 	t.Logf("Object name: %s", objName)
 	w := client.Bucket(bucket).Object(objName).NewWriter(ctx)
-	objBytes := generateRandomBytes(2 * 1024)
+	objBytes := generateRandomBytes(8 * 1024)
 	if _, err := w.Write(objBytes); err != nil {
 		t.Errorf("Failed while writing: %v", err)
 	}
@@ -86,20 +87,36 @@ func TestSomething(t *testing.T) {
 		t.Errorf("Failed while fetching object attrs")
 	}
 
-	startTime := time.Now()
-	r, err := client.Bucket(bucket).Object(objName).NewReader(ctx)
-	t.Log("Request time taken: ", time.Since(startTime).Seconds())
-	if err != nil {
-		t.Fatalf("NewReader: %v", err)
-	}
-	defer r.Close()
+	workerCount := 10
+	iterationsPerWorker := 6
+	var g errgroup.Group
 
-	buf := &bytes.Buffer{}
-	if _, err := io.Copy(buf, r); err != nil {
-		t.Fatalf("io.Copy: %v", err)
+	// Launch worker goroutines using errgroup
+	for i := 0; i < workerCount; i++ {
+		g.Go(func() error {
+			for j := 0; j < iterationsPerWorker; j++ {
+				startTime := time.Now()
+				r, err := client.Bucket(bucket).Object(objName).NewReader(ctx)
+				fmt.Printf("Request time taken: %v seconds\n", time.Since(startTime).Seconds())
+				if err != nil {
+					return fmt.Errorf("NewReader: %w", err)
+				}
+				defer r.Close()
+
+				buf := &bytes.Buffer{}
+				if _, err := io.Copy(buf, r); err != nil {
+					return fmt.Errorf("io.Copy: %w", err)
+				}
+				if !bytes.Equal(buf.Bytes(), objBytes) {
+					return fmt.Errorf("content does not match, got len %v, want len %v", buf.Len(), len(objBytes))
+				}
+			}
+			return nil
+		})
 	}
-	t.Log("time taken: ", time.Since(startTime).Seconds())
-	if !bytes.Equal(buf.Bytes(), objBytes) {
-		t.Errorf("content does not match, got len %v, want len %v", buf.Len(), len(objBytes))
+
+	// Wait for all worker goroutines to finish and check for errors
+	if err := g.Wait(); err != nil {
+		fmt.Printf("Error in worker: %v\n", err)
 	}
 }

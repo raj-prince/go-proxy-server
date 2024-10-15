@@ -6,12 +6,16 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/raj-prince/go-proxy-server/util"
 )
 
 // RequestCategory represents the category of a request.
 type RequestCategory int
+
+var fastLatencyCount = int64(40)
+var mu sync.Mutex // Global mutex
 
 // Enum values for request categories.
 const (
@@ -20,6 +24,19 @@ const (
 	StorageAPIOther
 	DirectObjectAccess
 )
+
+func getInstructions() map[string][]string {
+	mu.Lock()
+	defer mu.Unlock()
+	fmt.Println(fastLatencyCount)
+
+	if fastLatencyCount <= 0 {
+		return map[string][]string{"storage.objects.get": {"stall-for-3s-after-0K"}}
+	} else {
+		fastLatencyCount--
+		return map[string][]string{"storage.objects.get": {"stall-for-1s-after-0K"}}
+	}
+}
 
 // DifferentiateRequest categorizes the request based on URI and method.
 func DifferentiateRequest(r *http.Request) RequestCategory {
@@ -65,9 +82,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if DifferentiateRequest(r) == DirectObjectAccess {
-		instructions := map[string][]string{"storage.objects.get": {"stall-for-2s-after-0K"}}
-		testID := util.CreateRetryTest(instructions)
-		fmt.Println("Retry id: ", testID)
+		testID := util.CreateRetryTest(getInstructions())
 		req.Header.Set("x-retry-test-id", testID)
 	}
 
