@@ -23,3 +23,12 @@ go.work.sum
 
 # env file
 .env
+
+# Binaries file
+.go-proxy-server
+
+# Vendor
+.vendor
+
+# Ide
+.idea/

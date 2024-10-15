@@ -1,59 +1,104 @@
 package main
 
 import (
-        "fmt"
-        "io"
-        "net/http"
-        "os"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+
+	"github.com/raj-prince/go-proxy-server/util"
 )
 
+// RequestCategory represents the category of a request.
+type RequestCategory int
+
+// Enum values for request categories.
+const (
+	StorageAPIGet RequestCategory = iota
+	StorageAPIPost
+	StorageAPIOther
+	DirectObjectAccess
+)
+
+// DifferentiateRequest categorizes the request based on URI and method.
+func DifferentiateRequest(r *http.Request) RequestCategory {
+	uri := r.URL.Path
+	method := r.Method
+
+	if strings.Contains(uri, "/storage/v1") {
+		// Requests 1, 2, and 3: API requests
+		if method == http.MethodGet {
+			return StorageAPIGet
+		} else if method == http.MethodPost {
+			return StorageAPIPost
+		}
+		return StorageAPIOther
+	} else {
+		// Request 4: Direct resource access
+		return DirectObjectAccess
+	}
+}
+
+func printReq(r *http.Request) {
+	fmt.Printf("Request catagory:%d\n", DifferentiateRequest(r))
+	fmt.Println("RequestURI: ", r.RequestURI)
+	fmt.Println("Method: ", r.Method)
+	fmt.Println("URL: ", r.URL.String())
+	fmt.Println("Host:", r.Host)
+}
 func handler(w http.ResponseWriter, r *http.Request) {
-        // Create a new request to the target server
-        targetURL := "localhost" // Replace with your target server URL
-        req, err := http.NewRequest(r.Method, targetURL, r.Body)
-        if err != nil {
-                http.Error(w, err.Error(), http.StatusInternalServerError)
-                return
-        }
+	//printReq(r)
+	// Create a new request to the target server
+	targetHost := "localhost:9000" // Replace with your target server URL
+	targetURL := fmt.Sprintf("http://%s%s", targetHost, r.RequestURI)
 
-        // Copy 1  headers from the original request
-        for name, values := range r.Header {
-                for _, value := range values {
-                        req.Header.Add(name, value)
-                }
-        }
+	req, err := http.NewRequest(r.Method, targetURL, r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for name, values := range r.Header {
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
+	}
 
-        // Add a custom header to the request
-        req.Header.Set("X-My-Custom-Header", "This request has been proxied!")
+	if DifferentiateRequest(r) == DirectObjectAccess {
+		instructions := map[string][]string{"storage.objects.get": {"stall-for-2s-after-0K"}}
+		testID := util.CreateRetryTest(instructions)
+		fmt.Println("Retry id: ", testID)
+		req.Header.Set("x-retry-test-id", testID)
+	}
 
-        // Send the request to the target server
-        client := &http.Client{}
-        resp, err := client.Do(req)
-        if err != nil {
-                http.Error(w, err.Error(), http.StatusInternalServerError)
-                return
-        }
-        defer resp.Body.Close()
+	// Send the request to the target server
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
 
-        // Copy headers from the target server's response
-        for name, values := range resp.Header {
-                for _, value := range values {
-                        w.Header().Add(name, value)
-                }
-        }
+	// Copy headers from the target server's response
+	for name, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(name, value)
+		}
+	}
 
-        // Copy the response body
-        w.WriteHeader(resp.StatusCode)
-        io.Copy(w, resp.Body)
+	// Copy the response body
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 func main() {
-        port := "8080" // You can change the port if needed
-        fmt.Printf("Starting proxy server on :%s...\n", port)
-        http.HandleFunc("/", handler)
-        err := http.ListenAndServe(":"+port, nil)
-        if err != nil {
-                fmt.Println("Error starting proxy server:", err)
-                os.Exit(1)
-        }
+	port := "8080" // You can change the port if needed
+	fmt.Printf("Starting proxy server on :%s...\n", port)
+	http.HandleFunc("/", handler)
+	err := http.ListenAndServe(":"+port, nil)
+	if err != nil {
+		fmt.Println("Error starting proxy server:", err)
+		os.Exit(1)
+	}
 }
