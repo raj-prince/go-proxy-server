@@ -1,75 +1,28 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"strings"
-	"sync"
-
-	"github.com/raj-prince/go-proxy-server/util"
 )
 
-// RequestCategory represents the category of a request.
-type RequestCategory int
+var (
+	// Flags to accept config-file path.
+	fConfigPath = flag.String("config-path", "./configs/config.yaml", "Path to the file")
 
-var fastLatencyCount = int64(40)
-var mu sync.Mutex // Global mutex
+	// Initialized before the server gets started.
+	gConfig *Config
 
-// Enum values for request categories.
-const (
-	StorageAPIGet RequestCategory = iota
-	StorageAPIPost
-	StorageAPIOther
-	DirectObjectAccess
+	// Initialized before the server gets started.
+	gOpManager *OperationManager
 )
 
-func getInstructions() map[string][]string {
-	mu.Lock()
-	defer mu.Unlock()
-
-	if fastLatencyCount <= 0 {
-		return map[string][]string{"storage.objects.get": {"stall-for-3s-after-0K"}}
-	} else {
-		fastLatencyCount--
-		return map[string][]string{}
-		//return map[string][]string{"storage.objects.get": {"stall-for-1s-after-0K"}}
-	}
-}
-
-// DifferentiateRequest categorizes the request based on URI and method.
-func DifferentiateRequest(r *http.Request) RequestCategory {
-	uri := r.URL.Path
-	method := r.Method
-
-	if strings.Contains(uri, "/storage/v1") {
-		// Requests 1, 2, and 3: API requests
-		if method == http.MethodGet {
-			return StorageAPIGet
-		} else if method == http.MethodPost {
-			return StorageAPIPost
-		}
-		return StorageAPIOther
-	} else {
-		// Request 4: Direct resource access
-		return DirectObjectAccess
-	}
-}
-
-func printReq(r *http.Request) {
-	fmt.Printf("Request catagory:%d\n", DifferentiateRequest(r))
-	fmt.Println("RequestURI: ", r.RequestURI)
-	fmt.Println("Method: ", r.Method)
-	fmt.Println("URL: ", r.URL.String())
-	fmt.Println("Host:", r.Host)
-}
 func handler(w http.ResponseWriter, r *http.Request) {
-	//printReq(r)
-	// Create a new request to the target server
-	targetHost := "localhost:9000" // Replace with your target server URL
-	targetURL := fmt.Sprintf("http://%s%s", targetHost, r.RequestURI)
+	requestType := deduceRequestType(r)
 
+	targetURL := fmt.Sprintf("%s%s", gConfig.TargetHost, r.RequestURI)
 	req, err := http.NewRequest(r.Method, targetURL, r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -81,9 +34,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if DifferentiateRequest(r) == DirectObjectAccess {
-		testID := util.CreateRetryTest(getInstructions())
-		req.Header.Set("x-retry-test-id", testID)
+	err = handleRequest(requestType, req)
+	if err != nil {
+		fmt.Printf("Error in handling the request: %v", err)
 	}
 
 	// Send the request to the target server
@@ -108,10 +61,23 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// Parse the command-line flags
+	flag.Parse()
+
+	var err error
+	gConfig, err = parseConfigFile(*fConfigPath)
+	fmt.Printf("%+v\n", gConfig)
+	if err != nil {
+		fmt.Printf("Parsing error: %v\n", err)
+		os.Exit(1)
+	}
+
+	gOpManager = NewOperationManager(*gConfig)
+
 	port := "8080" // You can change the port if needed
 	fmt.Printf("Starting proxy server on :%s...\n", port)
 	http.HandleFunc("/", handler)
-	err := http.ListenAndServe(":"+port, nil)
+	err = http.ListenAndServe(":"+port, nil)
 	if err != nil {
 		fmt.Println("Error starting proxy server:", err)
 		os.Exit(1)
