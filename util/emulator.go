@@ -14,6 +14,10 @@ import (
 // Retry Test API for the given instructions. This is intended for emulator tests
 // of retry behavior that are not covered by conformance tests.
 func CreateRetryTest(instructions map[string][]string) string {
+	if len(instructions) == 0 {
+		return ""
+	}
+
 	// Need the HTTP hostname to set up a retry test, as well as knowledge of
 	// underlying transport to specify instructions.
 	//host := os.Getenv("STORAGE_EMULATOR_HOST")

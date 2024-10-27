@@ -28,13 +28,13 @@ const (
 func getInstructions() map[string][]string {
 	mu.Lock()
 	defer mu.Unlock()
-	fmt.Println(fastLatencyCount)
 
 	if fastLatencyCount <= 0 {
 		return map[string][]string{"storage.objects.get": {"stall-for-3s-after-0K"}}
 	} else {
 		fastLatencyCount--
-		return map[string][]string{"storage.objects.get": {"stall-for-1s-after-0K"}}
+		return map[string][]string{}
+		//return map[string][]string{"storage.objects.get": {"stall-for-1s-after-0K"}}
 	}
 }
 

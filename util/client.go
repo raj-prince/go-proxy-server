@@ -5,8 +5,10 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"time"
 
 	"cloud.google.com/go/storage"
+	"cloud.google.com/go/storage/experimental"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 )
@@ -59,5 +61,8 @@ func CreateHTTPClient(ctx context.Context, isHTTP2 bool) (client *storage.Client
 		UserAgent: "prince",
 	}
 
-	return storage.NewClient(ctx, option.WithHTTPClient(httpClient))
+	return storage.NewClient(ctx, option.WithHTTPClient(httpClient), experimental.WithReadStallTimeout(&experimental.ReadStallTimeoutConfig{
+		Min:              500 * time.Millisecond,
+		TargetPercentile: 0.99,
+	}))
 }
