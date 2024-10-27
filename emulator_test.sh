@@ -58,9 +58,13 @@ trap cleanup EXIT
 
 nohup go run . &
 proxy_pid=$!
-echo $proxy_pid
+echo "Proxy process: $proxy_pid"
 
 # Run tests
 STORAGE_EMULATOR_HOST="http://localhost:8080" go test -v -timeout 2m  2>&1 | tee -a sponge_log.out
 
-kill $proxy_pid
+kill -2 $proxy_pid
+
+p_listing_8080=$(lsof -i :8080 | awk '{print $2}' | tail -n +2)
+echo "Process listning on 8080: $p_listing_8080"
+kill -2 $p_listing_8080

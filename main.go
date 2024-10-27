@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 var (
@@ -19,7 +24,11 @@ var (
 	gOpManager *OperationManager
 )
 
-func handler(w http.ResponseWriter, r *http.Request) {
+type ProxyHandler struct {
+	http.Handler
+}
+
+func (ph ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestType := deduceRequestType(r)
 
 	targetURL := fmt.Sprintf("%s%s", gConfig.TargetHost, r.RequestURI)
@@ -60,6 +69,51 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
+// ProxyServer represents a simple proxy server
+type ProxyServer struct {
+	port     string
+	server   *http.Server
+	shutdown chan os.Signal
+}
+
+// NewProxyServer creates a new ProxyServer instance
+func NewProxyServer(port string) *ProxyServer {
+	return &ProxyServer{
+		port:     port,
+		shutdown: make(chan os.Signal, 1),
+	}
+}
+
+// Start starts the proxy server.
+func (ps *ProxyServer) Start() {
+	ps.server = &http.Server{
+		Addr:    ":" + ps.port,
+		Handler: ProxyHandler{},
+	}
+
+	// Start the server in a new goroutine
+	go func() {
+		log.Printf("Proxy server started on port %s\n", ps.port)
+		if err := ps.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	// Handle graceful shutdown
+	signal.Notify(ps.shutdown, syscall.SIGINT, syscall.SIGTERM)
+	<-ps.shutdown
+	log.Println("Shutting down proxy server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := ps.server.Shutdown(ctx); err != nil {
+		log.Fatalf("Proxy server forced to shutdown: %v", err)
+	} else {
+		log.Println("Proxy server exiting")
+	}
+}
+
 func main() {
 	// Parse the command-line flags
 	flag.Parse()
@@ -73,13 +127,6 @@ func main() {
 	}
 
 	gOpManager = NewOperationManager(*gConfig)
-
-	port := "8080" // You can change the port if needed
-	fmt.Printf("Starting proxy server on :%s...\n", port)
-	http.HandleFunc("/", handler)
-	err = http.ListenAndServe(":"+port, nil)
-	if err != nil {
-		fmt.Println("Error starting proxy server:", err)
-		os.Exit(1)
-	}
+	ps := NewProxyServer("8080")
+	ps.Start()
 }
