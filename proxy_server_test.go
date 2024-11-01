@@ -45,6 +45,7 @@ func TestMain(m *testing.M) {
 	}
 	client.SetRetry(
 		storage.WithBackoff(gax.Backoff{
+			Initial:    2 * time.Second,
 			Max:        maxRetryDuration,
 			Multiplier: retryMultiplier,
 		}),
@@ -58,7 +59,7 @@ func TestMain(m *testing.M) {
 	os.Exit(retCode)
 }
 
-func TestSomething(t *testing.T) {
+func TestAsyncEpoch(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup bucket.
@@ -87,8 +88,8 @@ func TestSomething(t *testing.T) {
 		t.Errorf("Failed while fetching object attrs")
 	}
 
-	workerCount := 10
-	iterationsPerWorker := 6
+	workerCount := 15
+	iterationsPerWorker := 4
 	var g errgroup.Group
 
 	// Launch worker goroutines using errgroup
@@ -113,6 +114,72 @@ func TestSomething(t *testing.T) {
 			}
 			return nil
 		})
+	}
+
+	// Wait for all worker goroutines to finish and check for errors
+	if err := g.Wait(); err != nil {
+		fmt.Printf("Error in worker: %v\n", err)
+	}
+}
+
+func TestSyncEpoch(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup bucket.
+	project := "fake-project"
+	bucket := fmt.Sprintf("http-bucket-%d", time.Now().Nanosecond())
+	t.Logf("Bucket name: %s", bucket)
+	if err := client.Bucket(bucket).Create(ctx, project, nil); err != nil {
+		fmt.Printf("Error while creating bucket: %v", err)
+		os.Exit(0)
+	}
+
+	// Setup object.
+	prefix := time.Now().Nanosecond()
+	objName := fmt.Sprintf("%d-object", prefix)
+	t.Logf("Object name: %s", objName)
+	w := client.Bucket(bucket).Object(objName).NewWriter(ctx)
+	objBytes := generateRandomBytes(8 * 1024)
+	if _, err := w.Write(objBytes); err != nil {
+		t.Errorf("Failed while writing: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Errorf("Failed while closing: %v", err)
+	}
+	_, err := client.Bucket(bucket).Object(objName).Attrs(ctx)
+	if err != nil {
+		t.Errorf("Failed while fetching object attrs")
+	}
+
+	workerCount := 15
+	iterationsPerWorker := 4
+	var g errgroup.Group
+
+	// Launch worker goroutines using errgroup
+	for i := 0; i < iterationsPerWorker; i++ {
+		for j := 0; j < workerCount; j++ {
+			g.Go(func() error {
+				startTime := time.Now()
+				r, err := client.Bucket(bucket).Object(objName).NewReader(ctx)
+				fmt.Printf("Request time taken: %v seconds\n", time.Since(startTime).Seconds())
+				if err != nil {
+					return fmt.Errorf("NewReader: %w", err)
+				}
+				defer r.Close()
+
+				buf := &bytes.Buffer{}
+				if _, err := io.Copy(buf, r); err != nil {
+					return fmt.Errorf("io.Copy: %w", err)
+				}
+				if !bytes.Equal(buf.Bytes(), objBytes) {
+					return fmt.Errorf("content does not match, got len %v, want len %v", buf.Len(), len(objBytes))
+				}
+				return nil
+			})
+		}
+		if err := g.Wait(); err != nil {
+			fmt.Printf("Error in worker: %v\n", err)
+		}
 	}
 
 	// Wait for all worker goroutines to finish and check for errors

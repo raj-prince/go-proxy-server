@@ -65,5 +65,4 @@ func CreateHTTPClient(ctx context.Context, isHTTP2 bool) (client *storage.Client
 		Min:              500 * time.Millisecond,
 		TargetPercentile: 0.99,
 	}))
-	// , option.WithEndpoint("http://localhost:9000")
 }

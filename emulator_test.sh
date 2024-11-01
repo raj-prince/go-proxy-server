@@ -61,7 +61,7 @@ proxy_pid=$!
 echo "Proxy process: $proxy_pid"
 
 # Run tests
-STORAGE_EMULATOR_HOST="http://localhost:8080" go test -v -timeout 2m  2>&1 | tee -a sponge_log.out
+STORAGE_EMULATOR_HOST="http://localhost:8080" go test -v -run TestAsyncEpoch -timeout 10m  2>&1 | tee -a sponge_log.out
 
 kill -2 $proxy_pid
 

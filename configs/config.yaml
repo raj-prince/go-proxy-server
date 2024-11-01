@@ -2,6 +2,6 @@ targetHost: http://localhost:9000
 retryConfig:
   - method: XmlRead
     fileName: test
-    retryInstruction: stall-for-3s-after-0K
-    skipCount: 4
-    retryCount: 3
+    retryInstruction: stall-for-5s-after-0K
+    skipCount: 15
+    retryCount: 1000000
